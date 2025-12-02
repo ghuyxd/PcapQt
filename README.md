@@ -18,6 +18,9 @@ It provides a lightweight, easy-to-use interface similar to Wireshark, allowing 
 
 ## 📦 Requirements
 
+- **Npcap**
+- https://npcap.com/#download
+
 - **Python 3.11+**
 - Dependencies (auto-installed via `pyproject.toml` / poetry):
   - `pyqt5`
