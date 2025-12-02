@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 
 from PyQt5.QtWidgets import QMainWindow
-from ui_pcapqt import Ui_PcapQt
-from models.packet_table_model import PacketTableModel
-from models.packet_detail_model import PacketDetailModel
-from threads.sniffer_thread import SnifferThread
-from utils.packet_parser import PacketParser
+from ..ui_pcapqt import Ui_PcapQt
+from ..models.packet_table_model import PacketTableModel
+from ..models.packet_detail_model import PacketDetailModel
+from ..threads.sniffer_thread import SnifferThread
+from ..utils.packet_parser import PacketParser
 
 
 class PcapQt(QMainWindow):
