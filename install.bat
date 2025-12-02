@@ -5,7 +5,7 @@ echo === Installing PcapQt environment ===
 
 set PROJECT_DIR=%~dp0
 
-REM Kiểm tra .venv
+REM Check .venv
 if exist "%PROJECT_DIR%.venv" (
     echo [INFO] .venv found.
 ) else (

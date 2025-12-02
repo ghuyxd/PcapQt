@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from PyQt5.QtWidgets import QMainWindow
+from PyQt5.QtCore import QTimer
 from ..ui_pcapqt import Ui_PcapQt
 from ..models.packet_table_model import PacketTableModel
 from ..models.packet_detail_model import PacketDetailModel
@@ -35,6 +36,15 @@ class PcapQt(QMainWindow):
 
         self.raw_packets = []
         self.current_packet_index = -1
+        self.auto_scroll_enabled = True
+        self.ui.detailButton.setChecked(False)
+
+        scrollbar = self.ui.packageTableView.verticalScrollBar()
+        scrollbar.valueChanged.connect(self.on_scroll_changed)
+        
+        self.scroll_check_timer = QTimer()
+        self.scroll_check_timer.timeout.connect(self.check_if_at_bottom)
+        self.scroll_check_timer.start(100)
 
         self.ui.startCapture.toggled.connect(self.toggle_capture)
         self.ui.restartButton.clicked.connect(self.restart_capture)
@@ -43,6 +53,23 @@ class PcapQt(QMainWindow):
         self.ui.nextPakageButton.clicked.connect(self.go_to_next)
         self.ui.firstPakageButton.clicked.connect(self.go_to_first)
         self.ui.lastPakageButton.clicked.connect(self.go_to_last)
+
+    def on_scroll_changed(self, value):
+        scrollbar = self.ui.packageTableView.verticalScrollBar()
+        
+        if scrollbar.maximum() - value <= 10:
+            if not self.auto_scroll_enabled:
+                self.auto_scroll_enabled = True
+        else:
+            if self.auto_scroll_enabled:
+                self.auto_scroll_enabled = False
+
+    def check_if_at_bottom(self):
+        scrollbar = self.ui.packageTableView.verticalScrollBar()
+        
+        if scrollbar.maximum() - scrollbar.value() <= 10:
+            if not self.auto_scroll_enabled and len(self.raw_packets) > 0:
+                self.auto_scroll_enabled = True
 
     def toggle_capture(self, checked):
         if checked:
@@ -59,6 +86,7 @@ class PcapQt(QMainWindow):
         self.detail_model.clear()
         self.raw_packets.clear()
         self.current_packet_index = -1
+        self.auto_scroll_enabled = True
 
         if self.ui.startCapture.isChecked():
             self.ui.startCapture.setChecked(False)
@@ -78,15 +106,22 @@ class PcapQt(QMainWindow):
 
         self.packet_model.add_packet(packet_data)
 
-        last_row = self.packet_model.rowCount() - 1
-        self.ui.packageTableView.scrollTo(self.packet_model.index(last_row, 0))
+        if self.auto_scroll_enabled:
+            last_row = self.packet_model.rowCount() - 1
+            self.ui.packageTableView.scrollTo(self.packet_model.index(last_row, 0))
 
     def on_packet_selected(self, current, previous):
         if not current.isValid():
             return
 
         row = current.row()
-        self.current_packet_index = row
+        self.current_packet_index = row  
+        
+        if row < len(self.raw_packets) - 1:
+            self.auto_scroll_enabled = False
+        
+        if not self.ui.detailButton.isChecked():
+            self.ui.detailButton.setChecked(True)
 
         if row < len(self.raw_packets):
             packet = self.raw_packets[row]
@@ -99,25 +134,32 @@ class PcapQt(QMainWindow):
 
     def go_to_previous(self):
         if self.current_packet_index > 0:
+            self.auto_scroll_enabled = False
             new_index = self.current_packet_index - 1
             self.ui.packageTableView.selectRow(new_index)
 
     def go_to_next(self):
         if self.current_packet_index < len(self.raw_packets) - 1:
+            self.auto_scroll_enabled = False
             new_index = self.current_packet_index + 1
             self.ui.packageTableView.selectRow(new_index)
 
     def go_to_first(self):
         if len(self.raw_packets) > 0:
+            self.auto_scroll_enabled = False
             self.ui.packageTableView.selectRow(0)
 
     def go_to_last(self):
         if len(self.raw_packets) > 0:
             last_row = len(self.raw_packets) - 1
             self.ui.packageTableView.selectRow(last_row)
+            self.auto_scroll_enabled = True
 
     def closeEvent(self, event):
         if self.sniffer.isRunning():
             self.sniffer.stop()
             self.sniffer.wait()
+        
+        self.scroll_check_timer.stop()
+        
         event.accept()
