@@ -3,7 +3,7 @@
 from PyQt5.QtWidgets import (
     QMainWindow, QLineEdit, QLabel, QMenu, QAction, QMessageBox
 )
-from PyQt5.QtCore import QTimer, Qt
+from PyQt5.QtCore import QTimer, Qt, QMutex, QMutexLocker
 from PyQt5.QtGui import QFont
 from scapy.all import TCP, UDP, IP
 
@@ -57,7 +57,17 @@ class PcapQt(QMainWindow):
 
         # Sniffer thread
         self.sniffer = SnifferThread()
-        self.sniffer.packet_captured.connect(self.on_packet_captured)
+        # Use QueuedConnection for thread-safe signal handling
+        self.sniffer.packet_captured.connect(self.on_packet_captured, Qt.QueuedConnection)
+        
+        # Packet queue for batched processing
+        self.packet_queue = []
+        self.packet_queue_mutex = QMutex()
+        
+        # Batch update timer (reduces UI updates)
+        self.batch_timer = QTimer()
+        self.batch_timer.timeout.connect(self.process_packet_queue)
+        self.batch_timer.start(50)  # Process queue every 50ms
 
         # State variables
         self.raw_packets = []
@@ -240,8 +250,7 @@ class PcapQt(QMainWindow):
             self.ui.startCapture.setChecked(False)
 
     def on_packet_captured(self, packet, packet_info):
-        self.raw_packets.append(packet)
-
+        """Queue packet for batched processing (thread-safe)."""
         packet_data = [
             packet_info['no'],
             f"{packet_info['time']:.6f}",
@@ -251,10 +260,25 @@ class PcapQt(QMainWindow):
             packet_info['length'],
             packet_info['info']
         ]
-
-        self.packet_model.add_packet(packet_data)
-
-        if self.auto_scroll_enabled:
+        
+        with QMutexLocker(self.packet_queue_mutex):
+            self.packet_queue.append((packet, packet_data))
+    
+    def process_packet_queue(self):
+        """Process queued packets in batches (runs on main thread)."""
+        with QMutexLocker(self.packet_queue_mutex):
+            if not self.packet_queue:
+                return
+            packets_to_process = self.packet_queue[:100]  # Process max 100 at a time
+            self.packet_queue = self.packet_queue[100:]
+        
+        # Add packets to model
+        for packet, packet_data in packets_to_process:
+            self.raw_packets.append(packet)
+            self.packet_model.add_packet(packet_data)
+        
+        # Auto-scroll once at the end of batch
+        if self.auto_scroll_enabled and packets_to_process:
             last_row = self.filter_model.rowCount() - 1
             if last_row >= 0:
                 self.ui.packageTableView.scrollTo(self.filter_model.index(last_row, 0))
@@ -312,5 +336,6 @@ class PcapQt(QMainWindow):
             self.sniffer.wait()
         
         self.scroll_check_timer.stop()
+        self.batch_timer.stop()
         
         event.accept()

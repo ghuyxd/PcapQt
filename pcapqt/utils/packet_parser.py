@@ -136,7 +136,7 @@ class PacketParser:
     @staticmethod
     def get_protocol_name(proto_num):
         """Get protocol name from IP protocol number."""
-        return {1: 'ICMP', 6: 'TCP', 17: 'UDP'}.get(proto_num, 'Unknown')
+        return {1: 'ICMP', 2: 'IGMP', 6: 'TCP', 17: 'UDP'}.get(proto_num, 'Unknown')
 
     @staticmethod
     def get_icmp_type(icmp_type):
