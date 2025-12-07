@@ -1,22 +1,20 @@
 @echo off
 setlocal
 
-set PROJECT_DIR=%~dp0
-
-REM Kiểm tra .venv
-if not exist "%PROJECT_DIR%.venv" (
-    echo [ERROR] .venv not found. Run install.bat first.
+:: Check if .venv exists
+if not exist ".venv" (
+    echo [ERROR] Virtual environment not found.
+    echo Please run 'install.bat' first to set up the environment.
     pause
-    exit /b
+    exit /b 1
 )
 
-REM Activate venv
-echo [INFO] Activating environment...
-call "%PROJECT_DIR%.venv\Scripts\activate.bat"
+:: Activate virtual environment
+call .venv\Scripts\activate.bat
 
-REM Run app
-echo [INFO] Running python -m pcapqt ...
-python -m pcapqt
+:: Run the application
+echo Starting PcapQt...
+python -m pcapqt.main
 
-endlocal
-pause
+:: Keep window open if it crashes immediately
+if errorlevel 1 pause
