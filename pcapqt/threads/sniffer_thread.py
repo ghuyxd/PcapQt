@@ -1,10 +1,13 @@
 from PyQt5.QtCore import QThread, pyqtSignal
 from datetime import datetime
 from scapy.all import sniff, Ether, IP, TCP, UDP, ICMP, ARP, Raw
+import copy
+import traceback
 
 
 class SnifferThread(QThread):
-    packet_captured = pyqtSignal(object, dict)
+    # Emit bytes (thread-safe) instead of packet object
+    packet_captured = pyqtSignal(bytes, dict)
 
     def __init__(self, iface=None):
         super().__init__()
@@ -23,17 +26,30 @@ class SnifferThread(QThread):
         self.packet_count = 0
 
         def packet_handler(packet):
+            # Don't process if stopped
             if not self.is_running:
-                return True
+                return  # Return None instead of True to avoid printing
 
-            self.packet_count += 1
-            packet_info = self.parse_packet(packet)
-            self.packet_captured.emit(packet, packet_info)
+            try:
+                self.packet_count += 1
+                packet_info = self.parse_packet(packet)
+                # Convert packet to bytes for thread-safe transfer
+                # This creates a copy that is safe to pass between threads
+                packet_bytes = bytes(packet)
+                self.packet_captured.emit(packet_bytes, packet_info)
+            except Exception as e:
+                print(f"Packet handler error: {e}")
+                traceback.print_exc()
 
         try:
             sniff(prn=packet_handler, store=False, stop_filter=lambda x: not self.is_running, iface=self.iface)
+        except PermissionError as e:
+            print(f"Permission error: {e}. Please run as Administrator.")
+        except OSError as e:
+            print(f"OS error during sniffing: {e}. Check if Npcap is installed.")
         except Exception as e:
             print(f"Sniffing error: {e}")
+            traceback.print_exc()
 
     def parse_packet(self, packet):
         info = {

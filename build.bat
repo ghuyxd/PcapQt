@@ -8,6 +8,17 @@ echo   Requires Python 3.11
 echo ========================================
 echo.
 
+:: Check if .venv exists
+if not exist ".venv" (
+    echo [ERROR] Virtual environment not found.
+    echo Please run 'install.bat' first to set up the environment.
+    pause
+    exit /b 1
+)
+
+:: Activate virtual environment
+call .venv\Scripts\activate.bat
+
 REM Kiểm tra Python version
 python --version 2>nul | findstr "3.11" >nul
 if errorlevel 1 (

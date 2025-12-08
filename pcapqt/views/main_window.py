@@ -5,7 +5,8 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import QTimer, Qt, QMutex, QMutexLocker
 from PyQt5.QtGui import QFont
-from scapy.all import TCP, UDP, IP
+from scapy.all import TCP, UDP, IP, Ether
+import traceback
 
 from ..ui_pcapqt import Ui_PcapQt
 from ..models.packet_table_model import PacketTableModel
@@ -249,39 +250,71 @@ class PcapQt(QMainWindow):
         if self.ui.startCapture.isChecked():
             self.ui.startCapture.setChecked(False)
 
-    def on_packet_captured(self, packet, packet_info):
-        """Queue packet for batched processing (thread-safe)."""
-        packet_data = [
-            packet_info['no'],
-            f"{packet_info['time']:.6f}",
-            packet_info['src'],
-            packet_info['dst'],
-            packet_info['protocol'],
-            packet_info['length'],
-            packet_info['info']
-        ]
+    def on_packet_captured(self, packet_bytes, packet_info):
+        """Queue packet for batched processing (thread-safe).
         
-        with QMutexLocker(self.packet_queue_mutex):
-            self.packet_queue.append((packet, packet_data))
+        Args:
+            packet_bytes: Raw packet bytes (thread-safe copy)
+            packet_info: Parsed packet information dict
+        """
+        try:
+            packet_data = [
+                packet_info['no'],
+                f"{packet_info['time']:.6f}",
+                packet_info['src'],
+                packet_info['dst'],
+                packet_info['protocol'],
+                packet_info['length'],
+                packet_info['info']
+            ]
+            
+            with QMutexLocker(self.packet_queue_mutex):
+                self.packet_queue.append((packet_bytes, packet_data))
+        except Exception as e:
+            print(f"Error queuing packet: {e}")
+            traceback.print_exc()
     
     def process_packet_queue(self):
         """Process queued packets in batches (runs on main thread)."""
-        with QMutexLocker(self.packet_queue_mutex):
-            if not self.packet_queue:
-                return
-            packets_to_process = self.packet_queue[:100]  # Process max 100 at a time
-            self.packet_queue = self.packet_queue[100:]
-        
-        # Add packets to model
-        for packet, packet_data in packets_to_process:
-            self.raw_packets.append(packet)
-            self.packet_model.add_packet(packet_data)
-        
-        # Auto-scroll once at the end of batch
-        if self.auto_scroll_enabled and packets_to_process:
-            last_row = self.filter_model.rowCount() - 1
-            if last_row >= 0:
-                self.ui.packageTableView.scrollTo(self.filter_model.index(last_row, 0))
+        try:
+            with QMutexLocker(self.packet_queue_mutex):
+                if not self.packet_queue:
+                    return
+                # Increased batch size for better performance under high load
+                packets_to_process = self.packet_queue[:200]
+                self.packet_queue = self.packet_queue[200:]
+            
+            # Batch insert packets to model (reduces UI updates)
+            packets_data = []
+            for packet_bytes, packet_data in packets_to_process:
+                # Reconstruct packet from bytes on main thread (thread-safe)
+                try:
+                    packet = Ether(packet_bytes)
+                except Exception:
+                    # If Ether parsing fails, store raw bytes
+                    packet = packet_bytes
+                self.raw_packets.append(packet)
+                packets_data.append(packet_data)
+            
+            # Add all packets at once if possible
+            for packet_data in packets_data:
+                self.packet_model.add_packet(packet_data)
+            
+            # Auto-scroll using scrollbar (faster than scrollTo)
+            if self.auto_scroll_enabled and packets_to_process:
+                # Use singleShot to defer scroll to next event loop iteration
+                # This allows the view to finish updating first
+                QTimer.singleShot(0, self._scroll_to_bottom)
+                
+        except Exception as e:
+            print(f"Error processing packet queue: {e}")
+            traceback.print_exc()
+    
+    def _scroll_to_bottom(self):
+        """Helper method to scroll to bottom."""
+        if self.auto_scroll_enabled:
+            scrollbar = self.ui.packageTableView.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
 
     def on_packet_selected(self, current, previous):
         if not current.isValid():
@@ -295,17 +328,21 @@ class PcapQt(QMainWindow):
         if row < len(self.raw_packets) - 1:
             self.auto_scroll_enabled = False
         
-        if not self.ui.detailButton.isChecked():
-            self.ui.detailButton.setChecked(True)
-
-        if row < len(self.raw_packets):
+        # Only update details if detail panel is already visible
+        # Don't auto-show the panel
+        if row < len(self.raw_packets) and self.ui.detailButton.isChecked():
             packet = self.raw_packets[row]
             self.display_packet_details(packet)
 
     def display_packet_details(self, packet):
-        details = PacketParser.get_packet_details(packet, self.current_packet_index)
-        self.detail_model.set_details(details)
-        self.ui.detailedPackageTableView.resizeColumnsToContents()
+        try:
+            details = PacketParser.get_packet_details(packet, self.current_packet_index)
+            self.detail_model.set_details(details)
+            self.ui.detailedPackageTableView.resizeColumnsToContents()
+        except Exception as e:
+            print(f"Error displaying packet details: {e}")
+            traceback.print_exc()
+            self.detail_model.set_details([['Error', str(e)]])
 
     def go_to_previous(self):
         current_row = self.ui.packageTableView.currentIndex().row()
