@@ -65,6 +65,7 @@ class PcapQt(QMainWindow):
         self.sniffer = SnifferThread()
         # Use QueuedConnection for thread-safe signal handling
         self.sniffer.packet_captured.connect(self.on_packet_captured, Qt.QueuedConnection)
+        self.sniffer.capture_error.connect(self.on_capture_error, Qt.QueuedConnection)
         
         # Packet queue for batched processing
         self.packet_queue = []
@@ -340,6 +341,13 @@ class PcapQt(QMainWindow):
             self.current_packet_index = row
             packet = self.raw_packets[row]
             self.display_packet_details(packet)
+
+    def on_capture_error(self, error_message):
+        """Handle capture errors from sniffer thread."""
+        # Stop capture button
+        self.ui.startCapture.setChecked(False)
+        # Show error message
+        QMessageBox.warning(self, "Capture Error", error_message)
 
     def toggle_capture(self, checked):
         if checked:
