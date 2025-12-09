@@ -2,12 +2,14 @@
 
 from PyQt5.QtWidgets import (
     QMainWindow, QLineEdit, QLabel, QMenu, QAction, QMessageBox,
-    QComboBox, QInputDialog
+    QComboBox, QInputDialog, QPushButton, QDialog, QVBoxLayout,
+    QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PyQt5.QtCore import QTimer, Qt, QMutex, QMutexLocker
 from PyQt5.QtGui import QFont
 from scapy.all import TCP, UDP, IP, Ether
 import traceback
+from collections import defaultdict
 
 from ..ui_pcapqt import Ui_PcapQt
 from ..models.packet_table_model import PacketTableModel
@@ -125,6 +127,90 @@ class PcapQt(QMainWindow):
         
         # Show interface selection dialog on startup
         QTimer.singleShot(100, self.show_interface_dialog)
+        
+        # Setup IP statistics tracking
+        self.setup_ip_statistics()
+    
+    def setup_ip_statistics(self):
+        """Setup IP request statistics tracking and button."""
+        # Track request counts per IP
+        self.ip_request_counts = defaultdict(int)
+        
+        # Statistics button in toolbar
+        self.stats_btn = QPushButton("📊 IP Stats")
+        self.stats_btn.setStyleSheet(
+            "QPushButton { background-color: #E3F2FD; color: #1565C0; padding: 4px 12px; "
+            "border-radius: 4px; font-weight: bold; }"
+            "QPushButton:hover { background-color: #BBDEFB; }"
+        )
+        self.stats_btn.clicked.connect(self.show_ip_statistics)
+        self.ui.horizontalLayout.addWidget(self.stats_btn)
+    
+    def update_ip_statistics(self, src_ip):
+        """Update request count for an IP address."""
+        if src_ip and src_ip != 'Unknown':
+            self.ip_request_counts[src_ip] += 1
+    
+    def show_ip_statistics(self):
+        """Show IP request statistics dialog."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("IP Request Statistics")
+        dialog.setMinimumSize(500, 400)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Info label
+        info_label = QLabel(f"Total IPs tracked: {len(self.ip_request_counts)}")
+        info_label.setStyleSheet("font-weight: bold; padding: 5px;")
+        layout.addWidget(info_label)
+        
+        # Table
+        table = QTableWidget()
+        table.setColumnCount(2)
+        table.setHorizontalHeaderLabels(["IP Address", "Request Count"])
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        table.setAlternatingRowColors(True)
+        
+        # Sort by count descending
+        sorted_ips = sorted(self.ip_request_counts.items(), key=lambda x: x[1], reverse=True)
+        table.setRowCount(len(sorted_ips))
+        
+        for row, (ip, count) in enumerate(sorted_ips):
+            table.setItem(row, 0, QTableWidgetItem(ip))
+            count_item = QTableWidgetItem(str(count))
+            count_item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(row, 1, count_item)
+        
+        layout.addWidget(table)
+        
+        # Button layout
+        from PyQt5.QtWidgets import QHBoxLayout
+        btn_layout = QHBoxLayout()
+        
+        # Reset button
+        reset_btn = QPushButton("🔄 Reset")
+        reset_btn.setStyleSheet(
+            "QPushButton { background-color: #FFCDD2; color: #C62828; padding: 6px 16px; "
+            "border-radius: 4px; font-weight: bold; }"
+        )
+        def reset_stats():
+            self.ip_request_counts.clear()
+            table.setRowCount(0)
+            info_label.setText("Total IPs tracked: 0")
+            QMessageBox.information(dialog, "Reset", "IP statistics have been reset.")
+        reset_btn.clicked.connect(reset_stats)
+        btn_layout.addWidget(reset_btn)
+        
+        btn_layout.addStretch()
+        
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        btn_layout.addWidget(close_btn)
+        
+        layout.addLayout(btn_layout)
+        
+        dialog.exec_()
 
     def setup_filter_bar(self):
         """Setup the filter input in the toolbar."""
@@ -380,6 +466,9 @@ class PcapQt(QMainWindow):
             packet_info: Parsed packet information dict
         """
         try:
+            # Update IP statistics
+            self.update_ip_statistics(packet_info['src'])
+            
             packet_data = [
                 packet_info['no'],
                 f"{packet_info['time']:.6f}",

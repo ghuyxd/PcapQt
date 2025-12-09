@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 from PyQt5.QtCore import QThread, pyqtSignal
 from datetime import datetime
 from scapy.all import sniff, Ether, IP, TCP, UDP, ICMP, ARP, Raw, conf
