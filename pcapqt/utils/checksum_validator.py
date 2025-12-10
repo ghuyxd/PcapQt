@@ -12,6 +12,33 @@ class ChecksumValidator:
     """Validate packet checksums."""
     
     @staticmethod
+    def _sum_words(data: bytes) -> int:
+        """
+        Sum all 16-bit words in data for checksum calculation.
+        
+        Args:
+            data: Bytes to sum
+            
+        Returns:
+            Sum of all 16-bit words (may overflow 16 bits)
+        """
+        checksum = 0
+        for i in range(0, len(data), 2):
+            if i + 1 < len(data):
+                word = (data[i] << 8) + data[i + 1]
+            else:
+                word = data[i] << 8
+            checksum += word
+        return checksum
+    
+    @staticmethod
+    def _fold_and_complement(checksum: int) -> int:
+        """Fold carries and compute one's complement."""
+        while checksum >> 16:
+            checksum = (checksum & 0xFFFF) + (checksum >> 16)
+        return (~checksum) & 0xFFFF
+    
+    @staticmethod
     def calculate_ip_checksum(header_bytes):
         """
         Calculate IP header checksum.
@@ -25,21 +52,8 @@ class ChecksumValidator:
         if len(header_bytes) < 20:
             return 0
         
-        # Sum all 16-bit words
-        checksum = 0
-        for i in range(0, len(header_bytes), 2):
-            if i + 1 < len(header_bytes):
-                word = (header_bytes[i] << 8) + header_bytes[i + 1]
-            else:
-                word = header_bytes[i] << 8
-            checksum += word
-        
-        # Add carry bits
-        while checksum >> 16:
-            checksum = (checksum & 0xFFFF) + (checksum >> 16)
-        
-        # One's complement
-        return (~checksum) & 0xFFFF
+        checksum = ChecksumValidator._sum_words(header_bytes)
+        return ChecksumValidator._fold_and_complement(checksum)
     
     @staticmethod
     def verify_ip_checksum(packet):
@@ -125,19 +139,8 @@ class ChecksumValidator:
         tcp_zeroed = tcp_bytes[:16] + b'\x00\x00' + tcp_bytes[18:]
         
         # Add TCP segment
-        checksum = pseudo_sum
-        for i in range(0, len(tcp_zeroed), 2):
-            if i + 1 < len(tcp_zeroed):
-                word = (tcp_zeroed[i] << 8) + tcp_zeroed[i + 1]
-            else:
-                word = tcp_zeroed[i] << 8
-            checksum += word
-        
-        # Fold carries
-        while checksum >> 16:
-            checksum = (checksum & 0xFFFF) + (checksum >> 16)
-        
-        expected = (~checksum) & 0xFFFF
+        checksum = pseudo_sum + ChecksumValidator._sum_words(tcp_zeroed)
+        expected = ChecksumValidator._fold_and_complement(checksum)
         
         return {
             'valid': actual == expected,
@@ -181,19 +184,8 @@ class ChecksumValidator:
         udp_zeroed = udp_bytes[:6] + b'\x00\x00' + udp_bytes[8:]
         
         # Add UDP datagram
-        checksum = pseudo_sum
-        for i in range(0, len(udp_zeroed), 2):
-            if i + 1 < len(udp_zeroed):
-                word = (udp_zeroed[i] << 8) + udp_zeroed[i + 1]
-            else:
-                word = udp_zeroed[i] << 8
-            checksum += word
-        
-        # Fold carries
-        while checksum >> 16:
-            checksum = (checksum & 0xFFFF) + (checksum >> 16)
-        
-        expected = (~checksum) & 0xFFFF
+        checksum = pseudo_sum + ChecksumValidator._sum_words(udp_zeroed)
+        expected = ChecksumValidator._fold_and_complement(checksum)
         if expected == 0:
             expected = 0xFFFF  # UDP uses 0xFFFF instead of 0
         
@@ -227,19 +219,8 @@ class ChecksumValidator:
         icmp_zeroed = icmp_bytes[:2] + b'\x00\x00' + icmp_bytes[4:]
         
         # Calculate checksum
-        checksum = 0
-        for i in range(0, len(icmp_zeroed), 2):
-            if i + 1 < len(icmp_zeroed):
-                word = (icmp_zeroed[i] << 8) + icmp_zeroed[i + 1]
-            else:
-                word = icmp_zeroed[i] << 8
-            checksum += word
-        
-        # Fold carries
-        while checksum >> 16:
-            checksum = (checksum & 0xFFFF) + (checksum >> 16)
-        
-        expected = (~checksum) & 0xFFFF
+        checksum = ChecksumValidator._sum_words(icmp_zeroed)
+        expected = ChecksumValidator._fold_and_complement(checksum)
         
         return {
             'valid': actual == expected,

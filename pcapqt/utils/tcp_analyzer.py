@@ -7,6 +7,8 @@ Tracks TCP connection states and analyzes packet sequences.
 from collections import defaultdict
 from scapy.all import TCP, IP
 
+from .helpers import normalize_flow_key
+
 
 class TCPAnalyzer:
     """Analyze TCP packets for issues like retransmissions."""
@@ -53,7 +55,7 @@ class TCPAnalyzer:
         tcp = packet[TCP]
         
         # Create flow key (bidirectional)
-        flow_key = self._get_flow_key(ip.src, ip.dst, tcp.sport, tcp.dport)
+        flow_key = normalize_flow_key(ip.src, ip.dst, tcp.sport, tcp.dport)
         direction_key = (ip.src, ip.dst, tcp.sport, tcp.dport)
         
         seq = tcp.seq
@@ -151,11 +153,7 @@ class TCPAnalyzer:
         
         return issues
     
-    def _get_flow_key(self, src_ip, dst_ip, src_port, dst_port):
-        """Get normalized flow key (same for both directions)."""
-        if (src_ip, src_port) < (dst_ip, dst_port):
-            return (src_ip, dst_ip, src_port, dst_port)
-        return (dst_ip, src_ip, dst_port, src_port)
+
     
     def _update_connection_state(self, flow_key, direction_key, flags):
         """Update TCP connection state machine."""
@@ -180,7 +178,7 @@ class TCPAnalyzer:
         if IP not in packet or TCP not in packet:
             return None
         
-        flow_key = self._get_flow_key(
+        flow_key = normalize_flow_key(
             packet[IP].src, packet[IP].dst,
             packet[TCP].sport, packet[TCP].dport
         )

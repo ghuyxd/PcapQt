@@ -5,11 +5,12 @@ Shows all unique endpoints with traffic statistics.
 """
 
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QDialog, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QHeaderView
 )
-from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
+
+from ..utils.helpers import create_number_item, create_bytes_item
 
 
 class EndpointsDialog(QDialog):
@@ -79,11 +80,11 @@ class EndpointsDialog(QDialog):
         table.setRowCount(len(endpoints))
         for row, endpoint in enumerate(endpoints):
             table.setItem(row, 0, QTableWidgetItem(endpoint['address']))
-            table.setItem(row, 1, self._create_number_item(endpoint['tx_packets']))
-            table.setItem(row, 2, self._create_bytes_item(endpoint['tx_bytes']))
-            table.setItem(row, 3, self._create_number_item(endpoint['rx_packets']))
-            table.setItem(row, 4, self._create_bytes_item(endpoint['rx_bytes']))
-            table.setItem(row, 5, self._create_number_item(endpoint['packets_total']))
+            table.setItem(row, 1, create_number_item(endpoint['tx_packets']))
+            table.setItem(row, 2, create_bytes_item(endpoint['tx_bytes']))
+            table.setItem(row, 3, create_number_item(endpoint['rx_packets']))
+            table.setItem(row, 4, create_bytes_item(endpoint['rx_bytes']))
+            table.setItem(row, 5, create_number_item(endpoint['packets_total']))
         
         return table
     
@@ -103,30 +104,7 @@ class EndpointsDialog(QDialog):
         table.setRowCount(len(endpoints))
         for row, endpoint in enumerate(endpoints):
             table.setItem(row, 0, QTableWidgetItem(endpoint['address']))
-            table.setItem(row, 1, self._create_number_item(endpoint['packets']))
-            table.setItem(row, 2, self._create_bytes_item(endpoint['bytes']))
+            table.setItem(row, 1, create_number_item(endpoint['packets']))
+            table.setItem(row, 2, create_bytes_item(endpoint['bytes']))
         
         return table
-    
-    def _create_number_item(self, value):
-        """Create right-aligned number item."""
-        item = QTableWidgetItem(f"{value:,}")
-        item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        item.setData(Qt.UserRole, value)
-        return item
-    
-    def _create_bytes_item(self, bytes_val):
-        """Create right-aligned bytes item."""
-        item = QTableWidgetItem(self._format_bytes(bytes_val))
-        item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        item.setData(Qt.UserRole, bytes_val)
-        return item
-    
-    def _format_bytes(self, bytes_val):
-        """Format bytes to human-readable string."""
-        if bytes_val < 1024:
-            return f"{bytes_val} B"
-        elif bytes_val < 1024 * 1024:
-            return f"{bytes_val / 1024:.1f} KB"
-        else:
-            return f"{bytes_val / (1024 * 1024):.1f} MB"

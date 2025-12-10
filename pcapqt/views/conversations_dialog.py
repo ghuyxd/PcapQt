@@ -5,11 +5,12 @@ Shows all conversations (streams) between endpoints.
 """
 
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QWidget, QHeaderView
+    QDialog, QVBoxLayout, QHBoxLayout,
+    QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QHeaderView
 )
-from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
+
+from ..utils.helpers import create_number_item, create_bytes_item
 
 
 class ConversationsDialog(QDialog):
@@ -80,34 +81,11 @@ class ConversationsDialog(QDialog):
         for row, conv in enumerate(conversations):
             table.setItem(row, 0, QTableWidgetItem(conv['address_a']))
             table.setItem(row, 1, QTableWidgetItem(conv['address_b']))
-            table.setItem(row, 2, self._create_number_item(conv['packets_ab']))
-            table.setItem(row, 3, self._create_number_item(conv['packets_ba']))
-            table.setItem(row, 4, self._create_bytes_item(conv['bytes_ab']))
-            table.setItem(row, 5, self._create_bytes_item(conv['bytes_ba']))
-            table.setItem(row, 6, self._create_number_item(conv['packets_total']))
+            table.setItem(row, 2, create_number_item(conv['packets_ab']))
+            table.setItem(row, 3, create_number_item(conv['packets_ba']))
+            table.setItem(row, 4, create_bytes_item(conv['bytes_ab']))
+            table.setItem(row, 5, create_bytes_item(conv['bytes_ba']))
+            table.setItem(row, 6, create_number_item(conv['packets_total']))
             table.setItem(row, 7, QTableWidgetItem(f"{conv['duration']:.2f}s"))
         
         return table
-    
-    def _create_number_item(self, value):
-        """Create a right-aligned number item."""
-        item = QTableWidgetItem(f"{value:,}")
-        item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        item.setData(Qt.UserRole, value)  # For sorting
-        return item
-    
-    def _create_bytes_item(self, bytes_val):
-        """Create a right-aligned bytes item."""
-        item = QTableWidgetItem(self._format_bytes(bytes_val))
-        item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        item.setData(Qt.UserRole, bytes_val)  # For sorting
-        return item
-    
-    def _format_bytes(self, bytes_val):
-        """Format bytes to human-readable string."""
-        if bytes_val < 1024:
-            return f"{bytes_val} B"
-        elif bytes_val < 1024 * 1024:
-            return f"{bytes_val / 1024:.1f} KB"
-        else:
-            return f"{bytes_val / (1024 * 1024):.1f} MB"

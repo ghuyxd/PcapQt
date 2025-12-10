@@ -6,10 +6,11 @@ Displays packet counts, bytes, duration, and rates.
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QTableWidget, QTableWidgetItem, QGroupBox, QGridLayout
+    QPushButton, QGroupBox, QGridLayout
 )
-from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
+
+from ..utils.helpers import format_bytes, format_duration
 
 
 class StatisticsDialog(QDialog):
@@ -35,10 +36,10 @@ class StatisticsDialog(QDialog):
         
         stats_data = [
             ("Total Packets:", f"{self.stats.get('total_packets', 0):,}"),
-            ("Total Bytes:", self._format_bytes(self.stats.get('total_bytes', 0))),
-            ("Capture Duration:", self._format_duration(self.stats.get('duration', 0))),
+            ("Total Bytes:", format_bytes(self.stats.get('total_bytes', 0))),
+            ("Capture Duration:", format_duration(self.stats.get('duration', 0))),
             ("Average Packets/sec:", f"{self.stats.get('packets_per_sec', 0):.2f}"),
-            ("Average Bytes/sec:", self._format_bytes(self.stats.get('bytes_per_sec', 0)) + "/s"),
+            ("Average Bytes/sec:", format_bytes(self.stats.get('bytes_per_sec', 0)) + "/s"),
             ("Average Packet Size:", f"{self.stats.get('avg_packet_size', 0):.1f} bytes"),
         ]
         
@@ -79,29 +80,3 @@ class StatisticsDialog(QDialog):
         button_layout.addWidget(close_btn)
         
         layout.addLayout(button_layout)
-    
-    def _format_bytes(self, bytes_val):
-        """Format bytes to human-readable string."""
-        if bytes_val < 1024:
-            return f"{bytes_val} bytes"
-        elif bytes_val < 1024 * 1024:
-            return f"{bytes_val / 1024:.2f} KB"
-        elif bytes_val < 1024 * 1024 * 1024:
-            return f"{bytes_val / (1024 * 1024):.2f} MB"
-        else:
-            return f"{bytes_val / (1024 * 1024 * 1024):.2f} GB"
-    
-    def _format_duration(self, seconds):
-        """Format duration to human-readable string."""
-        if seconds < 1:
-            return f"{seconds * 1000:.0f} ms"
-        elif seconds < 60:
-            return f"{seconds:.2f} seconds"
-        elif seconds < 3600:
-            mins = int(seconds // 60)
-            secs = seconds % 60
-            return f"{mins}m {secs:.1f}s"
-        else:
-            hours = int(seconds // 3600)
-            mins = int((seconds % 3600) // 60)
-            return f"{hours}h {mins}m"

@@ -11,6 +11,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 
+from ..utils.helpers import format_bytes
+
 
 class ProtocolHierarchyDialog(QDialog):
     """Dialog for displaying protocol hierarchy statistics."""
@@ -31,7 +33,7 @@ class ProtocolHierarchyDialog(QDialog):
         layout.setContentsMargins(16, 16, 16, 16)
         
         # Summary
-        summary = QLabel(f"Total: {self.total_packets:,} packets, {self._format_bytes(self.total_bytes)}")
+        summary = QLabel(f"Total: {self.total_packets:,} packets, {format_bytes(self.total_bytes)}")
         summary.setFont(QFont("Segoe UI", 10))
         layout.addWidget(summary)
         
@@ -65,13 +67,12 @@ class ProtocolHierarchyDialog(QDialog):
     
     def _populate_tree(self):
         """Populate the protocol tree."""
-        # Build hierarchy (simplified - flat list for now)
         for stat in self.protocol_stats:
             item = QTreeWidgetItem()
             item.setText(0, stat['protocol'])
             item.setText(1, f"{stat['packets']:,}")
             item.setText(2, f"{stat['percent_packets']:.1f}%")
-            item.setText(3, self._format_bytes(stat['bytes']))
+            item.setText(3, format_bytes(stat['bytes']))
             item.setText(4, f"{stat['percent_bytes']:.1f}%")
             
             # Right-align numbers
@@ -81,14 +82,3 @@ class ProtocolHierarchyDialog(QDialog):
             self.tree.addTopLevelItem(item)
         
         self.tree.expandAll()
-    
-    def _format_bytes(self, bytes_val):
-        """Format bytes to human-readable string."""
-        if bytes_val < 1024:
-            return f"{bytes_val} B"
-        elif bytes_val < 1024 * 1024:
-            return f"{bytes_val / 1024:.1f} KB"
-        elif bytes_val < 1024 * 1024 * 1024:
-            return f"{bytes_val / (1024 * 1024):.1f} MB"
-        else:
-            return f"{bytes_val / (1024 * 1024 * 1024):.2f} GB"
