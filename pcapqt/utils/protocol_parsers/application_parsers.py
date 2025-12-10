@@ -36,29 +36,116 @@ def parse_dns_app(packet, details):
 
 
 def parse_http_app(packet, details):
-    """Parse HTTP protocol details."""
+    """
+    Parse HTTP protocol details with enhanced Layer 7 analysis.
+    Supports Method detection, Header extraction, and POST Body analysis.
+    """
     if Raw not in packet:
         return
     try:
         payload = bytes(packet[Raw].load)
-        text = payload.decode('utf-8', errors='replace')
-        lines = text.split('\r\n')
+        # Try decoding as UTF-8, fallback to latin-1
+        try:
+            text = payload.decode('utf-8')
+        except UnicodeDecodeError:
+            text = payload.decode('latin-1', errors='replace')
+            
+        parts = text.split('\r\n\r\n', 1)
+        header_part = parts[0]
+        body_part = parts[1] if len(parts) > 1 else ''
+        
+        lines = header_part.split('\r\n')
         if not lines:
             return
-        first = lines[0]
-        if first.startswith('HTTP/'):
-            parts = first.split(' ', 2)
-            details.append(['HTTP Response', f"{parts[1]} {parts[2] if len(parts)>2 else ''}"])
+            
+        first_line = lines[0]
+        
+        # --- Request / Response Detection ---
+        if first_line.startswith('HTTP/'):
+            # Response: HTTP/1.1 200 OK
+            parts = first_line.split(' ', 2)
+            version = parts[0]
+            status_code = parts[1] if len(parts) > 1 else ''
+            reason = parts[2] if len(parts) > 2 else ''
+            details.append(['HTTP Response', f"{version} {status_code} {reason}"])
         else:
-            parts = first.split(' ')
-            details.append(['HTTP Request', f"{parts[0]} {parts[1][:50] if len(parts)>1 else ''}"])
-        # Show key headers
-        for line in lines[1:6]:
+            # Request: POST /api/login HTTP/1.1
+            parts = first_line.split(' ')
+            if len(parts) >= 2:
+                method = parts[0]
+                uri = parts[1]
+                details.append(['HTTP Request', f"{method} {uri}"])
+                details.append(['Method', method])
+                details.append(['URI', uri])
+            else:
+                 details.append(['HTTP Data', first_line[:50]])
+                 
+        # --- Header Parsing ---
+        headers = {}
+        for line in lines[1:]:
             if ':' in line:
                 k, v = line.split(':', 1)
-                if k.strip().lower() in ('host', 'content-type', 'content-length', 'user-agent'):
-                    details.append([k.strip(), v.strip()[:60]])
-    except:
+                headers[k.strip().lower()] = v.strip()
+                
+        # Display key headers
+        key_headers = [
+            'host', 'user-agent', 'content-type', 'content-length', 
+            'authorization', 'cookie', 'referer', 'server', 'location'
+        ]
+        for k, v in headers.items():
+            if k in key_headers:
+                # Truncate long headers
+                display_val = v[:80] + '...' if len(v) > 80 else v
+                details.append([k.title(), display_val])
+
+        # --- Body / Payload Analysis (Layer 7 Content) ---
+        if body_part:
+            details.append(['--- HTTP Payload (Body) ---', ''])
+            content_type = headers.get('content-type', '').lower()
+            
+            # 1. URL Encoded Form Data
+            if 'application/x-www-form-urlencoded' in content_type:
+                pairs = body_part.split('&')
+                for pair in pairs:
+                    if '=' in pair:
+                        k, v = pair.split('=', 1)
+                        # Basic URL unquote (replace + with space, %xx with char)
+                        from urllib.parse import unquote
+                        k = unquote(k)
+                        v = unquote(v)
+                        details.append([f"Form Key ({k})", v])
+            
+            # 2. JSON Data
+            elif 'application/json' in content_type:
+                import json
+                try:
+                    # Try to parse and pretty print primitive JSON
+                    json_obj = json.loads(body_part)
+                    formatted_json = json.dumps(json_obj, indent=2)
+                    # Show first few lines of JSON
+                    json_lines = formatted_json.split('\n')
+                    for i, line in enumerate(json_lines[:15]): # Limit to 15 lines
+                        details.append([f"JSON Line {i+1}", line])
+                    if len(json_lines) > 15:
+                         details.append(['...', f"({len(json_lines)-15} more lines)"])
+                except:
+                    details.append(['JSON Data', body_part[:100] + '...'])
+            
+            # 3. Text / HTML
+            elif 'text/' in content_type:
+                details.append(['Text/HTML Content', body_part[:100].strip() + '...'])
+            
+            # 4. Multipart (just detection)
+            elif 'multipart/form-data' in content_type:
+                boundary = content_type.split('boundary=')[-1] if 'boundary=' in content_type else 'Unknown'
+                details.append(['Multipart Data', f"Boundary: {boundary}"])
+                details.append(['Content', f"{len(body_part)} bytes of multipart data"])
+            
+            # 5. Other/Binary
+            else:
+                 details.append(['Body Data', f"{len(body_part)} bytes"])
+                 
+    except Exception as e:
         pass
 
 

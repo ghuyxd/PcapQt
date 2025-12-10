@@ -16,6 +16,8 @@ from datetime import datetime
 import struct
 import binascii
 
+from .dns_resolver import get_dns_resolver
+
 from .protocol_parsers import (
     WELL_KNOWN_PORTS,
     ETHER_TYPES,
@@ -47,7 +49,8 @@ class PacketParser:
             'no': packet_count,
             'time': (datetime.now() - start_time).total_seconds(),
             'src': 'Unknown', 'dst': 'Unknown',
-            'protocol': 'Unknown', 'length': len(packet), 'info': ''
+            'protocol': 'Unknown', 'length': len(packet), 'info': '',
+            'src_name': '', 'dst_name': ''  # Hostname resolution
         }
 
         if Ether in packet:
@@ -58,20 +61,78 @@ class PacketParser:
             info['src'] = packet[IP].src
             info['dst'] = packet[IP].dst
             info['protocol'] = packet[IP].proto
+            
+            # Try to resolve hostnames from DNS cache
+            resolver = get_dns_resolver()
+            src_name = resolver.get_domain_for_ip(packet[IP].src)
+            dst_name = resolver.get_domain_for_ip(packet[IP].dst)
+            if src_name:
+                info['src_name'] = src_name
+            if dst_name:
+                info['dst_name'] = dst_name
 
             if TCP in packet:
                 sport, dport = packet[TCP].sport, packet[TCP].dport
                 app_proto = PacketParser._detect_app_protocol(packet, sport, dport)
                 info['protocol'] = app_proto if app_proto else 'TCP'
-                info['info'] = f"{sport} → {dport} [Flags: {packet[TCP].flags}]"
+                info['protocol'] = app_proto if app_proto else 'TCP'
+                
+                # Enhanced TLS info
+                if app_proto == 'TLS':
+                    tls_ver = PacketParser._get_tls_details(packet)
+                    if tls_ver:
+                        info['protocol'] = tls_ver
+                
+                # Enhanced Info for HTTP
+                if app_proto == 'HTTP':
+                     http_info = PacketParser._get_http_info(packet)
+                     if http_info:
+                         info['info'] = http_info
+                     else:
+                         info['info'] = f"{sport} → {dport} [Flags: {packet[TCP].flags}]"
+                elif app_proto == 'TLS' or info['protocol'].startswith('TLS'):
+                    tls_info = PacketParser._get_tls_info(packet, sport, dport)
+                    if tls_info:
+                        info['info'] = tls_info
+                    else:
+                        info['info'] = f"{sport} → {dport} [Flags: {packet[TCP].flags}]"
+                else:
+                    # Generic enhanced info for all other TCP protocols
+                    extra_info = PacketParser._get_generic_protocol_info(packet, app_proto, sport, dport)
+                    if extra_info:
+                        info['info'] = f"{sport} → {dport} {extra_info}"
+                    else:
+                        info['info'] = f"{sport} → {dport} [Flags: {packet[TCP].flags}]"
             elif UDP in packet:
                 sport, dport = packet[UDP].sport, packet[UDP].dport
                 app_proto = PacketParser._detect_app_protocol(packet, sport, dport)
                 info['protocol'] = app_proto if app_proto else 'UDP'
-                info['info'] = f"{sport} → {dport}"
+                
+                # Enhanced info for UDP protocols
+                if app_proto == 'DNS':
+                    dns_info = PacketParser._get_dns_info(packet)
+                    if dns_info:
+                        info['info'] = dns_info
+                    else:
+                        info['info'] = f"{sport} → {dport}"
+                elif app_proto == 'QUIC':
+                    info['info'] = f"{sport} → {dport} (QUIC Encrypted)"
+                else:
+                    # Generic enhanced info for all other UDP protocols
+                    extra_info = PacketParser._get_generic_protocol_info(packet, app_proto, sport, dport)
+                    if extra_info:
+                        info['info'] = f"{sport} → {dport} {extra_info}"
+                    else:
+                        info['info'] = f"{sport} → {dport}"
             elif ICMP in packet:
                 info['protocol'] = 'ICMP'
                 info['info'] = f"Type: {packet[ICMP].type}"
+            
+            # Append hostname to info if resolved
+            if info['dst_name']:
+                info['info'] += f" (→ {info['dst_name']})"
+            elif info['src_name'] and not info['info'].endswith(')'):
+                info['info'] += f" (← {info['src_name']})"
         elif ARP in packet:
             info['protocol'] = 'ARP'
             info['src'] = packet[ARP].psrc
@@ -99,9 +160,22 @@ class PacketParser:
             if Raw in packet and PacketParser._is_http(bytes(packet[Raw].load)):
                 return 'HTTP'
         if sport == 443 or dport == 443 or sport == 8443 or dport == 8443:
+            # Check for QUIC (UDP 443 often used) - simplified check
+            if UDP in packet:
+                return 'QUIC'
             return 'TLS'
         if sport in (67, 68) or dport in (67, 68):
             return 'DHCP'
+        if sport == 5353 or dport == 5353:
+             return 'MDNS'
+        if sport == 5355 or dport == 5355:
+             return 'LLMNR'
+        if sport == 1900 or dport == 1900:
+             return 'SSDP'
+        if sport in (137, 138, 139) or dport in (137, 138, 139):
+             return 'NetBIOS'
+        if sport == 445 or dport == 445:
+             return 'SMB'
         if sport == 21 or dport == 21:
             return 'FTP'
         if sport == 20 or dport == 20:
@@ -120,6 +194,111 @@ class PacketParser:
             return 'SNMP'
         if sport == 23 or dport == 23:
             return 'Telnet'
+        # Additional protocols
+        if sport == 389 or dport == 389 or sport == 636 or dport == 636:
+            return 'LDAP'
+        if sport == 3389 or dport == 3389:
+            return 'RDP'
+        if sport == 3306 or dport == 3306:
+            return 'MySQL'
+        if sport == 5432 or dport == 5432:
+            return 'PostgreSQL'
+        if sport == 6379 or dport == 6379:
+            return 'Redis'
+        if sport == 69 or dport == 69:
+            return 'TFTP'
+        if sport == 5060 or dport == 5060 or sport == 5061 or dport == 5061:
+            return 'SIP'
+        if sport == 88 or dport == 88:
+            return 'Kerberos'
+        if sport == 135 or dport == 135:
+            return 'MS-RPC'
+        if sport == 514 or dport == 514:
+            return 'Syslog'
+        if sport == 1433 or dport == 1433:
+            return 'MSSQL'
+        if sport == 1521 or dport == 1521:
+            return 'Oracle'
+        if sport == 27017 or dport == 27017:
+            return 'MongoDB'
+        if sport == 6667 or dport == 6667:
+            return 'IRC'
+        if sport == 179 or dport == 179:
+            return 'BGP'
+        if sport == 500 or dport == 500:
+            return 'IKE'
+        if sport == 1194 or dport == 1194:
+            return 'OpenVPN'
+        # More UDP protocols
+        if sport == 3478 or dport == 3478 or sport == 3479 or dport == 3479:
+            return 'STUN'
+        if sport == 1812 or dport == 1812 or sport == 1813 or dport == 1813:
+            return 'RADIUS'
+        if sport == 554 or dport == 554:
+            return 'RTSP'
+        if (sport >= 16384 and sport <= 32767) or (dport >= 16384 and dport <= 32767):
+            # Common RTP port range
+            if UDP in packet:
+                return 'RTP/RTCP'
+        if sport == 1701 or dport == 1701:
+            return 'L2TP'
+        if sport == 1723 or dport == 1723:
+            return 'PPTP'
+        if sport == 4500 or dport == 4500:
+            return 'IPSec-NAT'
+        if sport == 1985 or dport == 1985:
+            return 'HSRP'
+        if sport == 520 or dport == 520:
+            return 'RIP'
+        if sport == 179 or dport == 179:
+            return 'BGP'
+        if sport == 5004 or dport == 5004 or sport == 5005 or dport == 5005:
+            return 'RTP'
+        if sport == 1645 or dport == 1645 or sport == 1646 or dport == 1646:
+            return 'RADIUS'
+        if sport == 49 or dport == 49:
+            return 'TACACS'
+        if sport == 1080 or dport == 1080:
+            return 'SOCKS'
+        if sport == 8080 or dport == 8080:
+            if Raw in packet and PacketParser._is_http(bytes(packet[Raw].load)):
+                return 'HTTP-Proxy'
+        if sport == 8443 or dport == 8443:
+            return 'HTTPS-Alt'
+        if sport == 9000 or dport == 9000:
+            return 'PHP-FPM'
+        if sport == 9200 or dport == 9200:
+            return 'Elasticsearch'
+        if sport == 6443 or dport == 6443:
+            return 'Kubernetes'
+        if sport == 2049 or dport == 2049:
+            return 'NFS'
+        if sport == 111 or dport == 111:
+            return 'Portmapper'
+        if sport == 873 or dport == 873:
+            return 'rsync'
+        if sport == 3128 or dport == 3128:
+            return 'Squid-Proxy'
+        if sport == 1883 or dport == 1883 or sport == 8883 or dport == 8883:
+            return 'MQTT'
+        if sport == 5222 or dport == 5222 or sport == 5223 or dport == 5223:
+            return 'XMPP'
+        if sport == 6881 or dport == 6881:
+            return 'BitTorrent'
+        if sport == 27015 or dport == 27015:
+            return 'Steam'
+        if sport == 25565 or dport == 25565:
+            return 'Minecraft'
+        if sport == 3724 or dport == 3724:
+            return 'WoW'
+        if sport == 5938 or dport == 5938:
+            return 'TeamViewer'
+        if sport == 5900 or dport == 5900:
+            return 'VNC'
+        if sport == 1935 or dport == 1935:
+            return 'RTMP'
+        if sport == 27960 or dport == 27960:
+            return 'Quake3'
         return None
 
     @staticmethod
@@ -132,6 +311,373 @@ class PacketParser:
             return any(text.startswith(m) for m in ['GET ', 'POST ', 'PUT ', 'DELETE ', 'HEAD ', 'OPTIONS ', 'PATCH ', 'HTTP/'])
         except:
             return False
+
+    @staticmethod
+    def _get_http_info(packet):
+        """Extract short HTTP info for main table (Method URI or Status)."""
+        if Raw not in packet:
+            return None
+        try:
+            payload = bytes(packet[Raw].load)
+            # Try decoding
+            try:
+                text = payload[:1024].decode('utf-8')
+            except:
+                text = payload[:1024].decode('latin-1', errors='ignore')
+                
+            lines = text.split('\r\n')
+            if not lines:
+                return None
+                
+            first_line = lines[0]
+            
+            # Request: GET /index.html HTTP/1.1
+            if not first_line.startswith('HTTP/'):
+                parts = first_line.split(' ')
+                if len(parts) >= 2:
+                    method = parts[0]
+                    uri = parts[1]
+                    # Extract Host header
+                    host = ''
+                    for line in lines[1:6]:
+                        if line.lower().startswith('host:'):
+                            host = f" (Host: {line.split(':', 1)[1].strip()})"
+                            break
+                    return f"{method} {uri}{host}"
+            
+            # Response: HTTP/1.1 200 OK
+            else:
+                parts = first_line.split(' ', 2)
+                if len(parts) >= 2:
+                    status = parts[1]
+                    reason = parts[2] if len(parts) > 2 else ''
+                    # Extract Server header
+                    server = ''
+                    for line in lines[1:6]:
+                        if line.lower().startswith('server:'):
+                             server = f" (Server: {line.split(':', 1)[1].strip()})"
+                             break
+                    return f"HTTP {status} {reason}{server}"
+                    
+            return None
+        except:
+            return None
+
+    @staticmethod
+    def _get_generic_protocol_info(packet, app_proto, sport, dport):
+        """Extract generic info for any protocol from payload."""
+        if Raw not in packet:
+            # Return service name if known
+            from .protocol_parsers import WELL_KNOWN_PORTS
+            service = WELL_KNOWN_PORTS.get(dport) or WELL_KNOWN_PORTS.get(sport)
+            if service:
+                return f"[{service}]"
+            return None
+            
+        try:
+            payload = bytes(packet[Raw].load)
+            if len(payload) < 3:
+                return None
+            
+            # Try to decode as text
+            try:
+                text = payload[:100].decode('utf-8', errors='ignore').strip()
+            except:
+                text = ''
+            
+            # SSH version
+            if app_proto == 'SSH' or sport == 22 or dport == 22:
+                if text.startswith('SSH-'):
+                    return f"[{text.split()[0]}]"
+                return "[SSH Encrypted]"
+            
+            # FTP/SMTP/POP3/IMAP commands or responses
+            if app_proto in ('FTP', 'SMTP', 'POP3', 'IMAP'):
+                if text[:3].isdigit():
+                    # Response code
+                    return f"[Response: {text[:3]}]"
+                else:
+                    # Command
+                    cmd = text.split()[0][:10] if text else ''
+                    if cmd:
+                        return f"[{cmd}]"
+            
+            # MDNS/SSDP/LLMNR - discovery protocols
+            if app_proto in ('MDNS', 'SSDP', 'LLMNR', 'NetBIOS'):
+                return "[Discovery/Broadcast]"
+            
+            # SMB
+            if app_proto == 'SMB':
+                return "[SMB Session]"
+            
+            # Database protocols
+            if app_proto in ('MySQL', 'PostgreSQL', 'MSSQL', 'Oracle', 'MongoDB', 'Redis'):
+                return "[Database Query]"
+            
+            # RDP
+            if app_proto == 'RDP':
+                return "[Remote Desktop]"
+            
+            # VPN protocols
+            if app_proto in ('OpenVPN', 'IKE'):
+                return "[VPN Tunnel]"
+            
+            # NTP
+            if app_proto == 'NTP':
+                return "[Time Sync]"
+            
+            # SNMP
+            if app_proto == 'SNMP':
+                return "[SNMP Request]"
+            
+            # Kerberos
+            if app_proto == 'Kerberos':
+                return "[Authentication]"
+            
+            # LDAP
+            if app_proto == 'LDAP':
+                return "[Directory Query]"
+            
+            # SIP
+            if app_proto == 'SIP':
+                if text.startswith('SIP/') or text.startswith('INVITE') or text.startswith('REGISTER'):
+                    method = text.split()[0]
+                    return f"[{method}]"
+                return "[VoIP Signaling]"
+            
+            # Syslog
+            if app_proto == 'Syslog':
+                return "[Log Message]"
+            
+            # Generic - show payload length
+            if len(payload) > 0:
+                return f"[{len(payload)} bytes]"
+            
+            return None
+        except:
+            return None
+
+    @staticmethod
+    def _get_dns_info(packet):
+        """Extract DNS query/response info for main table."""
+        if DNS not in packet:
+            return None
+        try:
+            dns = packet[DNS]
+            if dns.qr == 0:  # Query
+                if dns.qdcount > 0 and hasattr(dns, 'qd') and dns.qd:
+                    qname = dns.qd.qname
+                    if isinstance(qname, bytes):
+                        qname = qname.decode('utf-8', errors='replace')
+                    return f"Query: {qname}"
+            else:  # Response
+                if dns.qdcount > 0 and hasattr(dns, 'qd') and dns.qd:
+                    qname = dns.qd.qname
+                    if isinstance(qname, bytes):
+                        qname = qname.decode('utf-8', errors='replace')
+                    if dns.ancount > 0 and hasattr(dns, 'an') and dns.an:
+                        try:
+                            rdata = str(dns.an[0].rdata)
+                            return f"Response: {qname} → {rdata}"
+                        except:
+                            pass
+                    return f"Response: {qname}"
+            return None
+        except:
+            return None
+
+    @staticmethod
+    def _get_tls_info(packet, sport, dport):
+        """Extract TLS SNI or handshake info for main table."""
+        if Raw not in packet:
+            return None
+        try:
+            payload = bytes(packet[Raw].load)
+            if len(payload) < 6:
+                return None
+            
+            # Get TLS version from record layer
+            version_map = {
+                (3, 0): 'SSLv3',
+                (3, 1): 'TLSv1.0',
+                (3, 2): 'TLSv1.1',
+                (3, 3): 'TLSv1.2',
+                (3, 4): 'TLSv1.3'
+            }
+            major, minor = payload[1], payload[2]
+            tls_ver = version_map.get((major, minor), 'TLS')
+            
+            if payload[0] == 22:  # Handshake
+                hs_type = payload[5]
+                
+                # For Client Hello, try to get version from handshake layer
+                if hs_type == 1 and len(payload) > 10:
+                    h_major, h_minor = payload[9], payload[10]
+                    tls_ver = version_map.get((h_major, h_minor), tls_ver)
+                    sni = PacketParser._extract_sni(payload)
+                    if sni:
+                        return f"[{tls_ver}] Client Hello → {sni}"
+                    return f"[{tls_ver}] Client Hello"
+                elif hs_type == 2:
+                    return f"[{tls_ver}] Server Hello"
+                elif hs_type == 11:
+                    return f"[{tls_ver}] Certificate"
+                else:
+                    return f"[{tls_ver}] Handshake Type {hs_type}"
+            elif payload[0] == 23:  # Application Data
+                length = struct.unpack('!H', payload[3:5])[0] if len(payload) >= 5 else 0
+                return f"[{tls_ver}] Application Data ({length} bytes)"
+            elif payload[0] == 21:  # Alert
+                return f"[{tls_ver}] Alert"
+            return None
+        except:
+            return None
+
+    @staticmethod
+    def _extract_sni(payload):
+        """Extract SNI from TLS Client Hello."""
+        try:
+            if len(payload) < 50:
+                return None
+            pos = 5 + 4 + 2 + 32  # Skip headers to session ID
+            session_len = payload[pos]
+            pos += 1 + session_len
+            if pos + 2 > len(payload):
+                return None
+            cipher_len = struct.unpack('!H', payload[pos:pos+2])[0]
+            pos += 2 + cipher_len
+            if pos + 1 > len(payload):
+                return None
+            comp_len = payload[pos]
+            pos += 1 + comp_len
+            if pos + 2 > len(payload):
+                return None
+            ext_len = struct.unpack('!H', payload[pos:pos+2])[0]
+            pos += 2
+            ext_end = pos + ext_len
+            while pos + 4 < ext_end and pos + 4 < len(payload):
+                ext_type = struct.unpack('!H', payload[pos:pos+2])[0]
+                ext_data_len = struct.unpack('!H', payload[pos+2:pos+4])[0]
+                pos += 4
+                if ext_type == 0:  # SNI
+                    if pos + 5 < len(payload):
+                        name_len = struct.unpack('!H', payload[pos+3:pos+5])[0]
+                        if pos + 5 + name_len <= len(payload):
+                            return payload[pos+5:pos+5+name_len].decode('utf-8', errors='replace')
+                    break
+                pos += ext_data_len
+            return None
+        except:
+            return None
+
+    @staticmethod
+    def _get_tls_details(packet):
+        """Extract TLS version from handshake."""
+        if Raw not in packet:
+            return None
+        try:
+            payload = bytes(packet[Raw].load)
+            if len(payload) < 6:
+                return None
+                
+            # Content Type 22 = Handshake
+            if payload[0] == 22:
+                # TLS Record Version (payload[1:3]) - often 0x0301 (TLS 1.0) for compatibility
+                # We need Client Hello version or Supported Versions extension
+                
+                # Simple check for Record Layer version first
+                major, minor = payload[1], payload[2]
+                version_map = {
+                    (3, 0): 'SSLv3',
+                    (3, 1): 'TLSv1.0',
+                    (3, 2): 'TLSv1.1',
+                    (3, 3): 'TLSv1.2',
+                    (3, 4): 'TLSv1.3'
+                }
+                
+                # Try to find Handshake Version (Client Hello)
+                # Handshake Type (1 byte) + Length (3 bytes) + Version (2 bytes)
+                if payload[5] == 1: # Client Hello
+                     h_major, h_minor = payload[9], payload[10]
+                     return version_map.get((h_major, h_minor), 'TLS')
+                
+                return version_map.get((major, minor), 'TLS')
+            
+            return None
+        except:
+            return None
+
+    @staticmethod
+    def _get_application_action(packet, sport, dport):
+        """Detect the application-level action/request type."""
+        if Raw not in packet:
+            # Check for DNS without Raw
+            if DNS in packet:
+                dns = packet[DNS]
+                return 'DNS Response' if dns.qr else 'DNS Query'
+            return None
+            
+        try:
+            payload = bytes(packet[Raw].load)
+            if len(payload) < 3:
+                return None
+                
+            # HTTP Methods
+            text_start = payload[:10].decode('utf-8', errors='ignore').upper()
+            if text_start.startswith('GET '):
+                return 'HTTP GET Request'
+            elif text_start.startswith('POST '):
+                return 'HTTP POST Request'
+            elif text_start.startswith('PUT '):
+                return 'HTTP PUT Request'
+            elif text_start.startswith('DELETE '):
+                return 'HTTP DELETE Request'
+            elif text_start.startswith('HEAD '):
+                return 'HTTP HEAD Request'
+            elif text_start.startswith('OPTIONS '):
+                return 'HTTP OPTIONS Request'
+            elif text_start.startswith('PATCH '):
+                return 'HTTP PATCH Request'
+            elif text_start.startswith('HTTP/'):
+                return 'HTTP Response'
+            
+            # DNS
+            if sport == 53 or dport == 53:
+                if DNS in packet:
+                    dns = packet[DNS]
+                    return 'DNS Response' if dns.qr else 'DNS Query'
+            
+            # FTP Commands
+            if sport == 21 or dport == 21:
+                ftp_cmds = ['USER', 'PASS', 'LIST', 'RETR', 'STOR', 'QUIT', 'CWD', 'PWD', 'PORT', 'PASV']
+                for cmd in ftp_cmds:
+                    if text_start.startswith(cmd):
+                        return f'FTP {cmd} Command'
+                if payload[:3].isdigit():
+                    return 'FTP Response'
+            
+            # SMTP Commands
+            if sport == 25 or dport == 25 or sport == 587 or dport == 587:
+                smtp_cmds = ['HELO', 'EHLO', 'MAIL', 'RCPT', 'DATA', 'QUIT', 'AUTH']
+                for cmd in smtp_cmds:
+                    if text_start.startswith(cmd):
+                        return f'SMTP {cmd} Command'
+                if payload[:3].isdigit():
+                    return 'SMTP Response'
+            
+            # TLS Handshake
+            if len(payload) >= 6 and payload[0] == 22:  # Handshake
+                hs_type = payload[5]
+                hs_names = {1: 'Client Hello', 2: 'Server Hello', 11: 'Certificate', 12: 'Server Key Exchange', 16: 'Client Key Exchange'}
+                return f'TLS Handshake ({hs_names.get(hs_type, "Type " + str(hs_type))})'
+            
+            # TLS Application Data
+            if len(payload) >= 3 and payload[0] == 23:
+                return 'TLS Application Data (Encrypted)'
+            
+            return None
+        except:
+            return None
 
     @staticmethod
     def get_protocol_name(proto_num):
@@ -287,6 +833,11 @@ class PacketParser:
         else:
             details.append(['Session Type', 'N/A'])
             details.append(['Session State', 'No transport layer detected'])
+        
+        # Application Action (Request Type)
+        app_action = PacketParser._get_application_action(packet, sport, dport)
+        if app_action:
+            details.append(['Application Action', app_action])
 
         # === Layer 6: Presentation ===
         details.append(['=== Layer 6: Presentation ===', ''])
@@ -323,8 +874,12 @@ class PacketParser:
                     fmt = 'JSON'
                 elif payload[:5] == b'<!DOC' or payload[:6].lower() == b'<html>':
                     fmt = 'HTML'
-                elif payload[:4] == b'HTTP' or payload[:3] in (b'GET', b'POS', b'PUT', b'DEL'):
-                    fmt = 'HTTP Text'
+                elif payload[:4] == b'POST':
+                    fmt = 'HTTP POST Data'
+                elif payload[:3] in (b'GET', b'PUT', b'DEL', b'HEA', b'OPT', b'PAT'):
+                    fmt = 'HTTP Request'
+                elif payload[:4] == b'HTTP':
+                    fmt = 'HTTP Response'
                 elif all(32 <= b < 127 or b in (9, 10, 13) for b in payload[:50]):
                     fmt = 'ASCII Text'
                 details.append(['Data Format', fmt])
