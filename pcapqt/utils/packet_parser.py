@@ -75,7 +75,6 @@ class PacketParser:
                 sport, dport = packet[TCP].sport, packet[TCP].dport
                 app_proto = PacketParser._detect_app_protocol(packet, sport, dport)
                 info['protocol'] = app_proto if app_proto else 'TCP'
-                info['protocol'] = app_proto if app_proto else 'TCP'
                 
                 # Enhanced TLS info
                 if app_proto == 'TLS':
